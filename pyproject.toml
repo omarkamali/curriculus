@@ -1,0 +1,85 @@
+[build-system]
+requires = ["hatchling>=1.21.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "curriculus"
+version = "0.1.0"
+description = "Progressive curriculum learning for LLM training with fine-grained schedule control"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "Omar Kamali", email = "curriculus@omarkama.li"},
+]
+keywords = ["llm", "curriculum-learning", "training", "progressive-training"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
+torch = [
+    "torch>=2.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/omarkamali/curriculus"
+Repository = "https://github.com/omarkamali/curriculus"
+Issues = "https://github.com/omarkamali/curriculus/issues"
+Changelog = "https://github.com/omarkamali/curriculus/blob/main/CHANGELOG.md"
+
+[tool.hatchling.build.targets.wheel]
+packages = ["src/curriculus"]
+
+[tool.hatchling.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/README.md",
+    "/LICENSE",
+    "/CHANGELOG.md",
+    "/pyproject.toml",
+]
+
+[tool.hatch.envs.default]
+
+[tool.hatch.envs.default.scripts]
+publish = "python ./scripts/publish.py"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+addopts = "--cov=curriculus --cov-report=html --cov-report=term-missing"
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py38"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "C90"]
+ignore = ["E501"]  # Line too long (handled by formatter)
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+check_untyped_defs = true
+disallow_untyped_defs = false

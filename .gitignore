@@ -1,0 +1,48 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+dist/
+env/
+venv/
+
+# Project-specific
+/.env
+
+# Environment-specific
+/.env.local
+/.env.*
+
+# Logs
+*.log
+
+# Editor directories and files
+.vscode/
+
+# Test / coverage reports
+htmlcov/
+.coverage
+.cache
+nosetests.xml
+coverage.xml
+
+# pytest cache
+.pytest_cache/
+
+# IPython data
+.ipython/
+
+# pyenv
+.python-version
+
+# pipenv
+.venv
+Pipfile
+Pipfile.lock
