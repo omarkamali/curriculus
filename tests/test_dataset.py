@@ -499,3 +499,97 @@ class TestCurriculus:
         rng.shuffle(expected)
         assert items == expected
 
+    def test_union_of_columns_across_three_datasets(self):
+        """Datasets with progressive schemas expose the full union of columns."""
+
+        configs = [
+            {
+                "name": "one",
+                "dataset": [
+                    {"a": 1},
+                    {"a": 2},
+                ],
+            },
+            {
+                "name": "two",
+                "dataset": [
+                    {"a": 10, "b": 20},
+                    {"a": 11, "b": 21},
+                ],
+            },
+            {
+                "name": "three",
+                "dataset": [
+                    {"a": 100, "b": 200, "c": 300},
+                    {"a": 101, "b": 201, "c": 301},
+                ],
+            },
+        ]
+
+        schedule = [
+            (0.0, {"one": 1.0}),
+            (0.4, {"one": 1.0}),
+            (0.6, {"two": 1.0}),
+            (0.8, {"two": 1.0}),
+            (1.0, {"three": 1.0}),
+        ]
+
+        splits = Curriculus(
+            configs,
+            schedule=schedule,
+            total_steps=12,
+            oversampling=True,
+            seed=0,
+        )
+
+        train_split = splits["train"]
+        rows = train_split.to_list()
+
+        for row in rows:
+            assert set(row.keys()) == {"a", "b", "c"}
+
+        assert any(row["b"] is not None for row in rows)
+        assert any(row["c"] is not None for row in rows)
+        assert train_split.columns == ["a", "b", "c"]
+
+    def test_union_of_columns_auto_schedule(self):
+        """Auto-generated schedules still retain the full column union."""
+
+        configs = [
+            {
+                "name": "one",
+                "dataset": [
+                    {"a": 1},
+                ],
+            },
+            {
+                "name": "two",
+                "dataset": [
+                    {"a": 10, "b": 20},
+                ],
+            },
+            {
+                "name": "three",
+                "dataset": [
+                    {"a": 100, "b": 200, "c": 300},
+                ],
+            },
+        ]
+
+        splits = Curriculus(
+            configs,
+            total_steps=9,
+            oversampling=True,
+            seed=0,
+        )
+
+        train_split = splits["train"]
+        rows = train_split.to_list()
+
+        for row in rows:
+            assert set(row.keys()) == {"a", "b", "c"}
+
+        assert any(row["b"] is not None for row in rows)
+        assert any(row["c"] is not None for row in rows)
+        assert train_split.columns == ["a", "b", "c"]
+

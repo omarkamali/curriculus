@@ -63,6 +63,7 @@ class _CurriculusSplit:
         self._preview_cache: Dict[int, List[Any]] = {}
         self._cached_columns: Optional[List[str]] = None
         self._column_order: List[str] = []
+        self._base_column_order: List[str] = []
         self.current_step = 0
         self._shuffle_seed = shuffle_seed
 
@@ -87,37 +88,56 @@ class _CurriculusSplit:
         self._preview_cache.clear()
         self._cached_columns = None
         self._column_order = []
+        self._base_column_order = []
+
+    def _register_base_columns(self, mapping: Mapping[str, Any]) -> None:
+        new_keys = [key for key in mapping if key not in self._base_column_order]
+        if new_keys:
+            self._base_column_order.extend(new_keys)
+
+    def _register_columns(self, mapping: Mapping[str, Any]) -> None:
+        data = dict(mapping)
+        if self._transforms:
+            self._column_order = list(data.keys())
+        else:
+            if not self._column_order:
+                self._column_order = list(data.keys())
+            else:
+                new_keys = [key for key in data if key not in self._column_order]
+                if new_keys:
+                    self._column_order.extend(new_keys)
+                    for cached_items in self._preview_cache.values():
+                        for idx, cached_item in enumerate(cached_items):
+                            if not isinstance(cached_item, Mapping):
+                                continue
+                            cached_dict = dict(cached_item)
+                            for key in new_keys:
+                                cached_dict.setdefault(key, None)
+                            cached_items[idx] = cached_dict
+
+        self._cached_columns = list(self._column_order)
 
     def _standardize_mapping(self, mapping: Mapping[str, Any]) -> Dict[str, Any]:
         data = dict(mapping)
-        new_keys = [key for key in data if key not in self._column_order]
+        self._register_base_columns(data)
 
-        if new_keys:
-            self._column_order.extend(new_keys)
-            for cached_items in self._preview_cache.values():
-                for idx, cached_item in enumerate(cached_items):
-                    if not isinstance(cached_item, Mapping):
-                        continue
-                    cached_dict = dict(cached_item)
-                    for key in new_keys:
-                        cached_dict.setdefault(key, None)
-                    cached_items[idx] = cached_dict
+        if not self._base_column_order:
+            return data
 
-        if not self._column_order:
-            standardized = data
-        else:
-            standardized = {key: data.get(key) for key in self._column_order}
+        standardized = {key: data.get(key) if key in data else None for key in self._base_column_order}
 
-        for key, value in standardized.items():
-            if value is None and key not in data:
-                standardized[key] = None
+        if not self._transforms:
+            self._column_order = list(self._base_column_order)
+            self._cached_columns = list(self._column_order)
 
-        self._cached_columns = list(self._column_order)
         return standardized
 
     def _create_iterators(self) -> Dict[str, Iterator[Any]]:
         iterators: Dict[str, Iterator[Any]] = {}
         base_seed = self._shuffle_seed if self._shuffle_seed is not None else self._base_seed
+
+        first_items: Dict[str, Any] = {}
+        rest_iterators: Dict[str, Iterator[Any]] = {}
 
         for idx, name in enumerate(self.dataset_names):
             ds = self.planner.dataset_map[name]
@@ -128,12 +148,42 @@ class _CurriculusSplit:
 
             if self.shuffled:
                 items = list(base_iterator)
+                for sample in items:
+                    if isinstance(sample, Mapping):
+                        self._register_base_columns(sample)
                 if items:
                     rng = random.Random((base_seed + idx) % 2**63)
                     rng.shuffle(items)
                 iterable: Iterable[Any] = items
+
+                if self.planner.oversampling:
+                    iterators[name] = itertools.cycle(iterable)
+                else:
+                    iterators[name] = iter(iterable)
+                continue
+
+            iterator = iter(base_iterator)
+            try:
+                first_item = next(iterator)
+            except StopIteration:
+                empty_iter = ()
+                if self.planner.oversampling:
+                    iterators[name] = itertools.cycle(empty_iter)
+                else:
+                    iterators[name] = iter(empty_iter)
+                continue
+
+            if isinstance(first_item, Mapping):
+                self._register_base_columns(first_item)
+
+            first_items[name] = first_item
+            rest_iterators[name] = iterator
+
+        for name in self.dataset_names:
+            if name in rest_iterators:
+                iterable = itertools.chain([first_items[name]], rest_iterators[name])
             else:
-                iterable = base_iterator
+                continue  # already handled (shuffled or empty)
 
             if self.planner.oversampling:
                 iterators[name] = itertools.cycle(iterable)
@@ -228,9 +278,13 @@ class _CurriculusSplit:
                 iterators[chosen_key] = None
                 continue
 
-            transformed = self._apply_transforms(item, produced)
+            prepared = item
+            if isinstance(prepared, Mapping):
+                prepared = self._standardize_mapping(prepared)
+
+            transformed = self._apply_transforms(prepared, produced)
             if isinstance(transformed, Mapping):
-                transformed = self._standardize_mapping(transformed)
+                self._register_columns(transformed)
             yield transformed
             produced += 1
             self.current_step += 1
