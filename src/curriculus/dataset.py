@@ -5,12 +5,13 @@ Iterable dataset with curriculum learning support.
 import bisect
 import itertools
 import random
-from typing import Any, Dict, List, Optional, Tuple
+from collections.abc import Mapping
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from .planner import CurriculusPlanner
 
 
-class CurriculusIterableDataset:
+class _CurriculusIterableDataset:
     """
     An iterable dataset that progressively mixes multiple datasets based on a schedule.
 
@@ -107,7 +108,7 @@ class CurriculusIterableDataset:
 
         return keys, probs
 
-    def __iter__(self) -> Any:
+    def __iter__(self) -> Iterator[Any]:
         """Iterate over samples from the curriculum."""
         while self.current_step < self.planner.total_steps:
             keys, probs = self._get_current_weights()
@@ -134,3 +135,99 @@ class CurriculusIterableDataset:
     def __len__(self) -> int:
         """Return total number of steps."""
         return self.planner.total_steps
+
+
+class CurriculusIterableDatasetDict(Mapping[str, _CurriculusIterableDataset]):
+    """Mapping of curriculum splits to iterable datasets."""
+
+    def __init__(self, splits: Dict[str, _CurriculusIterableDataset]):
+        self._splits = splits
+
+    def __getitem__(self, key: str) -> _CurriculusIterableDataset:
+        return self._splits[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._splits)
+
+    def __len__(self) -> int:
+        return len(self._splits)
+
+    def __repr__(self) -> str:  # pragma: no cover - repr is for debugging
+        splits = ", ".join(self._splits.keys())
+        return f"{self.__class__.__name__}({{{splits}}})"
+
+
+def _clone_planner(base: CurriculusPlanner, *, total_steps: int) -> CurriculusPlanner:
+    """Create a planner clone with identical configuration but new total steps."""
+
+    return CurriculusPlanner(
+        base.datasets,
+        schedule=base.schedule,
+        total_steps=total_steps,
+        oversampling=base.oversampling,
+        best_effort=base.best_effort,
+    )
+
+
+def CurriculusIterableDataset(
+    datasets: List[Dict[str, Any]],
+    planner: Optional[CurriculusPlanner] = None,
+    *,
+    train_ratio: Optional[float] = None,
+    split_names: Tuple[str, str] = ("train", "test"),
+    **planner_kwargs: Any,
+) -> CurriculusIterableDatasetDict:
+    """Build curriculum iterable dataset splits.
+
+    Args:
+        datasets: Dataset configuration list.
+        planner: Optional preconfigured planner.
+        train_ratio: Fraction of total steps allocated to the train split.
+            Defaults to 1.0 (train only).
+        split_names: Names for the train and test splits.
+        **planner_kwargs: Additional planner arguments (schedule, total_steps, etc.).
+
+    Returns:
+        CurriculusIterableDatasetDict with at least a ``train`` split.
+    """
+
+    if len(split_names) != 2:
+        raise ValueError("split_names must contain exactly two entries (train, test)")
+
+    ratio = 1.0 if train_ratio is None else float(train_ratio)
+    if not 0.0 <= ratio <= 1.0:
+        raise ValueError("train_ratio must be between 0.0 and 1.0 inclusive")
+
+    base_planner = planner or CurriculusPlanner(datasets, **planner_kwargs)
+    total_steps = base_planner.total_steps
+
+    train_steps = int(round(total_steps * ratio))
+    train_steps = max(0, min(train_steps, total_steps))
+    test_steps = total_steps - train_steps
+
+    splits: Dict[str, _CurriculusIterableDataset] = {}
+
+    if train_steps > 0:
+        if train_steps == base_planner.total_steps and planner is not None:
+            train_planner = base_planner
+        elif train_steps == base_planner.total_steps and planner is None:
+            train_planner = base_planner
+        else:
+            train_planner = _clone_planner(base_planner, total_steps=train_steps)
+
+        splits[split_names[0]] = _CurriculusIterableDataset(
+            datasets,
+            planner=train_planner,
+        )
+
+    if test_steps > 0:
+        test_planner = _clone_planner(base_planner, total_steps=test_steps)
+        splits[split_names[1]] = _CurriculusIterableDataset(
+            datasets,
+            planner=test_planner,
+        )
+
+    if not splits:
+        raise ValueError("Split configuration produced no datasets")
+
+    return CurriculusIterableDatasetDict(splits)

@@ -45,11 +45,11 @@ datasets = [
     {"name": "hard", "dataset": hard_data},
 ]
 
-# Auto-generates: easy -> medium -> hard
-dataset = CurriculusIterableDataset(datasets)
+# Auto-generates: easy -> medium -> hard with train/test split
+dataset_dict = CurriculusIterableDataset(datasets, train_ratio=0.8)
 
 # Use with your trainer
-for sample in dataset:
+for sample in dataset_dict["train"]:
     # sample comes from the appropriate dataset based on training progress
     pass
 ```
@@ -69,16 +69,18 @@ schedule = [
     (1.0, {"easy": 0.0, "medium": 0.0, "hard": 1.0}),  # Pure hard
 ]
 
-dataset = CurriculusIterableDataset(
+dataset_dict = CurriculusIterableDataset(
     datasets,
     schedule=schedule,
     total_steps=10000,
     oversampling=True,  # Repeat data if insufficient
     best_effort=True,   # Scale down gracefully if short (default)
+    train_ratio=0.9,    # 90% train, 10% test
 )
 
-for sample in dataset:
-    pass
+# Access splits
+train_data = dataset_dict["train"]
+test_data = dataset_dict["test"]
 ```
 
 ## How It Works
@@ -133,6 +135,11 @@ datasets = [
 - **total_steps**: Total training steps. If None, sums all dataset sizes.
 - **oversampling**: If True, repeats data when insufficient. Default: False.
 - **best_effort**: If True, scales down dataset usage gracefully. Default: True.
+- **train_ratio**: Fraction of total steps for train split (0.0-1.0). Default: 1.0 (train only).
+- **split_names**: Tuple of (train_name, test_name). Default: (`"train"`, `"test"`).
+
+Returns:
+    `CurriculusIterableDatasetDict` mapping of split names to iterable datasets
 
 ## Real-World Example
 
@@ -151,16 +158,20 @@ datasets = [
     {"name": "hard", "dataset": hard_data},
 ]
 
-# Step 3: Create the dataset
-curriculum_ds = CurriculusIterableDataset(
+# Step 3: Create dataset with 85% train split
+curriculum_dict = CurriculusIterableDataset(
     datasets,
     total_steps=100_000,
-    oversampling=True,  # hard data is small, so repeat
+    oversampling=True,
+    train_ratio=0.85
 )
 
-# Step 4: Use in training loop
-for batch in DataLoader(curriculum_ds, batch_size=32):
+# Step 4: Use splits
+for batch in DataLoader(curriculum_dict["train"], batch_size=32):
     loss = model.train_step(batch)
+
+for batch in DataLoader(curriculum_dict["test"], batch_size=32):
+    metrics = model.eval_step(batch)
 ```
 
 ## Advanced: Pre-flight Validation
@@ -316,3 +327,10 @@ Check that your schedule includes all datasets. If a dataset doesn't appear in t
 ## Questions?
 
 Open an issue: https://github.com/omarkamali/curriculus/issues
+
+
+## Example Notebooks
+
+Explore end-to-end walkthroughs in the `examples/` directory:
+
+1. **Sequential difficulty fade** – [examples/01_easy_medium_hard.ipynb](examples/01_easy_medium_hard.ipynb)

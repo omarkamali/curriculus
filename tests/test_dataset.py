@@ -29,9 +29,9 @@ class TestCurriculusIterableDataset:
             {"name": "A", "dataset": MockDataset("A", ["A"] * 100)},
             {"name": "B", "dataset": MockDataset("B", ["B"] * 100)},
         ]
-        ds = CurriculusIterableDataset(configs, total_steps=10, oversampling=True)
+        ds_dict = CurriculusIterableDataset(configs, total_steps=10, oversampling=True)
 
-        items = list(ds)
+        items = list(ds_dict["train"])
         assert len(items) == 10
         assert all(item in ["A", "B"] for item in items)
 
@@ -47,11 +47,11 @@ class TestCurriculusIterableDataset:
             (1.0, {"A": 0.0, "B": 1.0}),
         ]
         random.seed(1234)
-        ds = CurriculusIterableDataset(
+        ds_dict = CurriculusIterableDataset(
             configs, schedule=sched, total_steps=1000, oversampling=True
         )
 
-        items = list(ds)
+        items = list(ds_dict["train"])
         assert len(items) == 1000
 
         segments = [items[i : i + 250] for i in range(0, 1000, 250)]
@@ -64,8 +64,8 @@ class TestCurriculusIterableDataset:
     def test_len(self):
         """Test __len__ returns total_steps."""
         configs = [{"name": "A", "dataset": MockDataset("A")}]  # pragma: no mutate
-        ds = CurriculusIterableDataset(configs, total_steps=100)
-        assert len(ds) == 100
+        ds_dict = CurriculusIterableDataset(configs, total_steps=100)
+        assert len(ds_dict["train"]) == 100
 
     def test_interpolation_at_mid_schedule(self):
         """Test weight interpolation at midpoint."""
@@ -79,13 +79,14 @@ class TestCurriculusIterableDataset:
             (0.0, {"A": 1.0, "B": 0.0}),
             (1.0, {"A": 0.0, "B": 1.0}),
         ]
-        ds = CurriculusIterableDataset(
+        ds_dict = CurriculusIterableDataset(
             configs, schedule=sched, total_steps=1000, oversampling=True
         )
 
         # At step 500 (progress=0.5), weights should be approximately 50/50
-        ds.current_step = 500
-        keys, probs = ds._get_current_weights()
+        train_split = ds_dict["train"]
+        train_split.current_step = 500
+        keys, probs = train_split._get_current_weights()
 
         assert set(keys) == {"A", "B"}
         # Probabilities should be close to [0.5, 0.5]
@@ -98,11 +99,12 @@ class TestCurriculusIterableDataset:
             {"name": "A", "dataset": MockDataset("A")},
             {"name": "B", "dataset": MockDataset("B")},
         ]
-        ds = CurriculusIterableDataset(configs, oversampling=True)
+        ds_dict = CurriculusIterableDataset(configs, oversampling=True)
 
         # Should auto-generate schedule and total_steps
-        assert len(ds.planner.schedule) == 2
-        assert ds.planner.total_steps > 0
+        train_split = ds_dict["train"]
+        assert len(train_split.planner.schedule) == 2
+        assert train_split.planner.total_steps > 0
 
     def test_get_current_weights_at_boundaries(self):
         """Test weight calculation at schedule boundaries."""
@@ -110,19 +112,20 @@ class TestCurriculusIterableDataset:
             {"name": "A", "dataset": MockDataset("A", ["A"] * 100)},
         ]
         sched = [(0.0, {"A": 1.0}), (1.0, {"A": 1.0})]
-        ds = CurriculusIterableDataset(
+        ds_dict = CurriculusIterableDataset(
             configs, schedule=sched, total_steps=100, oversampling=True
         )
 
         # At step 0
-        ds.current_step = 0
-        keys, probs = ds._get_current_weights()
+        train_split = ds_dict["train"]
+        train_split.current_step = 0
+        keys, probs = train_split._get_current_weights()
         assert keys == ["A"]
         assert probs == [1.0]
 
         # At step 99 (last step)
-        ds.current_step = 99
-        keys, probs = ds._get_current_weights()
+        train_split.current_step = 99
+        keys, probs = train_split._get_current_weights()
         assert keys == ["A"]
         assert probs == [1.0]
 
@@ -138,7 +141,7 @@ class TestCurriculusIterableDataset:
             (1.0, {"A": 0.5, "B": 0.5}),
         ]
         # B is short, should be scaled down (factor ~0.5)
-        ds = CurriculusIterableDataset(
+        ds_dict = CurriculusIterableDataset(
             configs,
             schedule=sched,
             total_steps=200,
@@ -147,7 +150,8 @@ class TestCurriculusIterableDataset:
         )
 
         # With best effort, B's probability should be reduced
-        keys, probs = ds._get_current_weights()
+        train_split = ds_dict["train"]
+        keys, probs = train_split._get_current_weights()
         prob_map = dict(zip(keys, probs))
         assert set(prob_map) == {"A", "B"}
         # A should have more than B since B was scaled down (expected 2/3 vs 1/3)
@@ -165,7 +169,7 @@ class TestCurriculusIterableDataset:
             (1.0, {"A": 0.5, "B": 0.5}),
         ]
         random.seed(4321)
-        ds = CurriculusIterableDataset(
+        ds_dict = CurriculusIterableDataset(
             configs,
             schedule=sched,
             total_steps=200,
@@ -173,7 +177,7 @@ class TestCurriculusIterableDataset:
             best_effort=True,
         )
 
-        items = list(ds)
+        items = list(ds_dict["train"])
         assert len(items) == 200
         ratio_b = items.count("B") / len(items)
         # Only 50 B samples exist, so best-effort scaling should consume all
@@ -192,7 +196,7 @@ class TestCurriculusIterableDataset:
             (1.0, {"A": 0.5, "B": 0.5}),
         ]
         random.seed(2468)
-        ds = CurriculusIterableDataset(
+        ds_dict = CurriculusIterableDataset(
             configs,
             schedule=sched,
             total_steps=200,
@@ -200,7 +204,7 @@ class TestCurriculusIterableDataset:
             best_effort=False,
         )
 
-        items = list(ds)
+        items = list(ds_dict["train"])
         assert len(items) == 200
         ratio_b = items.count("B") / len(items)
         assert ratio_b == pytest.approx(0.5, abs=0.08)
@@ -224,3 +228,18 @@ class TestCurriculusIterableDataset:
                 oversampling=False,
                 best_effort=False,
             )
+
+    def test_train_test_split_ratio(self):
+        """Dataset dict exposes train/test splits respecting ratio."""
+        configs = [
+            {"name": "A", "dataset": MockDataset("A", ["A"] * 100)},
+            {"name": "B", "dataset": MockDataset("B", ["B"] * 100)},
+        ]
+
+        ds_dict = CurriculusIterableDataset(
+            configs, total_steps=100, oversampling=True, train_ratio=0.8
+        )
+
+        assert set(ds_dict.keys()) == {"train", "test"}
+        assert len(ds_dict["train"]) == 80
+        assert len(ds_dict["test"]) == 20
