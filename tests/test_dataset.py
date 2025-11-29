@@ -3,7 +3,7 @@
 import random
 
 import pytest
-from curriculus.dataset import CurriculusIterableDataset
+from curriculus import Curriculus
 
 
 class MockDataset:
@@ -20,8 +20,8 @@ class MockDataset:
         return iter(self.data)
 
 
-class TestCurriculusIterableDataset:
-    """Test the iterable dataset."""
+class TestCurriculus:
+    """Test curriculum iterable splits."""
 
     def test_basic_iteration(self):
         """Test basic iteration over curriculum dataset."""
@@ -29,7 +29,7 @@ class TestCurriculusIterableDataset:
             {"name": "A", "dataset": MockDataset("A", ["A"] * 100)},
             {"name": "B", "dataset": MockDataset("B", ["B"] * 100)},
         ]
-        ds_dict = CurriculusIterableDataset(configs, total_steps=10, oversampling=True)
+        ds_dict = Curriculus(configs, total_steps=10, oversampling=True)
 
         items = list(ds_dict["train"])
         assert len(items) == 10
@@ -47,7 +47,7 @@ class TestCurriculusIterableDataset:
             (1.0, {"A": 0.0, "B": 1.0}),
         ]
         random.seed(1234)
-        ds_dict = CurriculusIterableDataset(
+        ds_dict = Curriculus(
             configs, schedule=sched, total_steps=1000, oversampling=True
         )
 
@@ -64,7 +64,7 @@ class TestCurriculusIterableDataset:
     def test_len(self):
         """Test __len__ returns total_steps."""
         configs = [{"name": "A", "dataset": MockDataset("A")}]  # pragma: no mutate
-        ds_dict = CurriculusIterableDataset(configs, total_steps=100)
+        ds_dict = Curriculus(configs, total_steps=100)
         assert len(ds_dict["train"]) == 100
 
     def test_interpolation_at_mid_schedule(self):
@@ -79,7 +79,7 @@ class TestCurriculusIterableDataset:
             (0.0, {"A": 1.0, "B": 0.0}),
             (1.0, {"A": 0.0, "B": 1.0}),
         ]
-        ds_dict = CurriculusIterableDataset(
+        ds_dict = Curriculus(
             configs, schedule=sched, total_steps=1000, oversampling=True
         )
 
@@ -99,7 +99,7 @@ class TestCurriculusIterableDataset:
             {"name": "A", "dataset": MockDataset("A")},
             {"name": "B", "dataset": MockDataset("B")},
         ]
-        ds_dict = CurriculusIterableDataset(configs, oversampling=True)
+        ds_dict = Curriculus(configs, oversampling=True)
 
         # Should auto-generate schedule and total_steps
         train_split = ds_dict["train"]
@@ -112,7 +112,7 @@ class TestCurriculusIterableDataset:
             {"name": "A", "dataset": MockDataset("A", ["A"] * 100)},
         ]
         sched = [(0.0, {"A": 1.0}), (1.0, {"A": 1.0})]
-        ds_dict = CurriculusIterableDataset(
+        ds_dict = Curriculus(
             configs, schedule=sched, total_steps=100, oversampling=True
         )
 
@@ -141,7 +141,7 @@ class TestCurriculusIterableDataset:
             (1.0, {"A": 0.5, "B": 0.5}),
         ]
         # B is short, should be scaled down (factor ~0.5)
-        ds_dict = CurriculusIterableDataset(
+        ds_dict = Curriculus(
             configs,
             schedule=sched,
             total_steps=200,
@@ -169,7 +169,7 @@ class TestCurriculusIterableDataset:
             (1.0, {"A": 0.5, "B": 0.5}),
         ]
         random.seed(4321)
-        ds_dict = CurriculusIterableDataset(
+        ds_dict = Curriculus(
             configs,
             schedule=sched,
             total_steps=200,
@@ -196,7 +196,7 @@ class TestCurriculusIterableDataset:
             (1.0, {"A": 0.5, "B": 0.5}),
         ]
         random.seed(2468)
-        ds_dict = CurriculusIterableDataset(
+        ds_dict = Curriculus(
             configs,
             schedule=sched,
             total_steps=200,
@@ -221,7 +221,7 @@ class TestCurriculusIterableDataset:
         ]
 
         with pytest.raises(ValueError, match="shortage"):
-            CurriculusIterableDataset(
+            Curriculus(
                 configs,
                 schedule=sched,
                 total_steps=200,
@@ -236,10 +236,168 @@ class TestCurriculusIterableDataset:
             {"name": "B", "dataset": MockDataset("B", ["B"] * 100)},
         ]
 
-        ds_dict = CurriculusIterableDataset(
+        ds_dict = Curriculus(
             configs, total_steps=100, oversampling=True, train_ratio=0.8
         )
 
         assert set(ds_dict.keys()) == {"train", "test"}
         assert len(ds_dict["train"]) == 80
         assert len(ds_dict["test"]) == 20
+
+    def test_columns_metadata_and_repr(self):
+        """Iterable dataset exposes column metadata and readable repr."""
+        configs = [
+            {
+                "name": "A",
+                "dataset": MockDataset(
+                    "A",
+                    [
+                        {"x": 1, "y": 2},
+                        {"x": 3, "y": 4},
+                        {"x": 5, "y": 6},
+                    ],
+                ),
+            }
+        ]
+
+        ds_dict = Curriculus(configs, total_steps=3)
+        train_split = ds_dict["train"]
+
+        assert train_split.columns == ["x", "y"]
+        assert train_split.column_names == ["x", "y"]
+        assert train_split.num_columns == 2
+        assert train_split.shape == (3, 2)
+
+        preview = train_split.peek(2)
+        assert preview == [{"x": 1, "y": 2}, {"x": 3, "y": 4}]
+
+        representation = repr(train_split)
+        assert "columns=['x', 'y']" in representation
+        assert "total_steps=3" in representation
+
+    def test_remove_and_rename_columns(self):
+        """Column removal and renaming operate lazily on examples."""
+        configs = [
+            {
+                "name": "A",
+                "dataset": MockDataset(
+                    "A",
+                    [
+                        {"x": 1, "y": 2},
+                        {"x": 3, "y": 4},
+                    ],
+                ),
+            }
+        ]
+
+        train_split = Curriculus(configs, total_steps=2)["train"]
+
+        trimmed = train_split.remove_column("y")
+        trimmed_rows = trimmed.to_list()
+        assert trimmed_rows == [{"x": 1}, {"x": 3}]
+        assert trimmed.columns == ["x"]
+
+        renamed = train_split.rename_columns({"x": "feature_x", "y": "feature_y"})
+        renamed_rows = renamed.to_list()
+        assert renamed_rows == [
+            {"feature_x": 1, "feature_y": 2},
+            {"feature_x": 3, "feature_y": 4},
+        ]
+        assert renamed.columns == ["feature_x", "feature_y"]
+
+        # Original split should remain unchanged because operations default to copy=True
+        original_rows = train_split.to_list()
+        assert original_rows == [{"x": 1, "y": 2}, {"x": 3, "y": 4}]
+
+    def test_map_with_indices_and_remove_columns(self):
+        """Map supports index-aware transforms and column pruning."""
+        configs = [
+            {
+                "name": "A",
+                "dataset": MockDataset(
+                    "A",
+                    [
+                        {"x": 10, "y": 1},
+                        {"x": 20, "y": 2},
+                        {"x": 30, "y": 3},
+                    ],
+                ),
+            }
+        ]
+
+        train_split = Curriculus(configs, total_steps=3)["train"]
+
+        mapped = train_split.map(lambda ex, idx: {**ex, "idx": idx}, with_indices=True)
+        mapped_rows = mapped.take(3)
+        assert mapped_rows == [
+            {"x": 10, "y": 1, "idx": 0},
+            {"x": 20, "y": 2, "idx": 1},
+            {"x": 30, "y": 3, "idx": 2},
+        ]
+
+        summed = train_split.map(
+            lambda ex: {**ex, "sum": ex["x"] + ex["y"]}, remove_columns=["y"]
+        )
+        summed_rows = summed.to_list()
+        assert summed_rows == [
+            {"x": 10, "sum": 11},
+            {"x": 20, "sum": 22},
+            {"x": 30, "sum": 33},
+        ]
+
+    def test_to_hf_dataset_requires_mapping(self):
+        """to_hf_dataset converts mapping examples and rejects non-mapping samples."""
+        pytest.importorskip("datasets")
+        configs = [
+            {
+                "name": "A",
+                "dataset": MockDataset(
+                    "A",
+                    [
+                        {"x": 1, "y": 2},
+                        {"x": 3, "y": 4},
+                    ],
+                ),
+            }
+        ]
+
+        train_split = Curriculus(configs, total_steps=2)["train"]
+        ds = train_split.to_hf_dataset()
+        assert ds.num_rows == 2
+        assert set(ds.column_names) == {"x", "y"}
+
+        list_split = Curriculus(
+            [
+                {
+                    "name": "B",
+                    "dataset": MockDataset("B", [1, 2, 3]),
+                }
+            ],
+            total_steps=3,
+        )["train"]
+
+        with pytest.raises(TypeError, match="dict-like"):
+            list_split.to_hf_dataset()
+
+    def test_splits_to_hf_datasetdict(self):
+        """CurriculusSplits materializes into HF DatasetDict."""
+        datasets_mod = pytest.importorskip("datasets")
+
+        configs = [
+            {
+                "name": "A",
+                "dataset": MockDataset(
+                    "A",
+                    [
+                        {"value": 1},
+                        {"value": 2},
+                    ],
+                ),
+            }
+        ]
+
+        splits = Curriculus(configs, total_steps=2)
+        ds_dict = splits.to_hf_dataset()
+        assert isinstance(ds_dict, datasets_mod.DatasetDict)
+        assert ds_dict["train"].num_rows == 2
+

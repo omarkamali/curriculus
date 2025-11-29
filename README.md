@@ -36,7 +36,7 @@ pip install curriculus[torch]
 ### Minimal Example (Sequential Fading)
 
 ```python
-from curriculus import CurriculusIterableDataset
+from curriculus import Curriculus
 
 # Your datasets
 datasets = [
@@ -46,7 +46,7 @@ datasets = [
 ]
 
 # Auto-generates: easy -> medium -> hard with train/test split
-dataset_dict = CurriculusIterableDataset(datasets, train_ratio=0.8)
+dataset_dict = Curriculus(datasets, train_ratio=0.8)
 
 # Use with your trainer
 for sample in dataset_dict["train"]:
@@ -57,7 +57,7 @@ for sample in dataset_dict["train"]:
 ### Custom Schedule
 
 ```python
-from curriculus import CurriculusIterableDataset
+from curriculus import Curriculus
 
 # Explicit schedule: define milestones and weights
 schedule = [
@@ -69,7 +69,7 @@ schedule = [
     (1.0, {"easy": 0.0, "medium": 0.0, "hard": 1.0}),  # Pure hard
 ]
 
-dataset_dict = CurriculusIterableDataset(
+dataset_dict = Curriculus(
     datasets,
     schedule=schedule,
     total_steps=10000,
@@ -128,9 +128,9 @@ datasets = [
 
 ## Configuration Options
 
-### CurriculusIterableDataset
+### Curriculus
 
-- **datasets**: List of `{"name": ..., "dataset": ...}` dicts
+- **datasets**: List of `{"name": ..., "dataset": ...}` dicts.
 - **schedule**: List of `(progress, weights)` tuples. If None, auto-generates sequential schedule.
 - **total_steps**: Total training steps. If None, sums all dataset sizes.
 - **oversampling**: If True, repeats data when insufficient. Default: False.
@@ -139,12 +139,20 @@ datasets = [
 - **split_names**: Tuple of (train_name, test_name). Default: (`"train"`, `"test"`).
 
 Returns:
-    `CurriculusIterableDatasetDict` mapping of split names to iterable datasets
+    `CurriculusSplits` mapping of split names to iterable datasets.
+
+Each split exposes convenient helpers to explore and transform the stream:
+- `peek`/`head`/`take` preview upcoming samples without exhausting the iterator.
+- `columns`, `shape`, and `num_columns` surface lightweight schema metadata.
+- `remove_column` / `rename_column(s)` and `map` enable lazy columnar transforms.
+- `to_hf_iterable_dataset()` and `to_hf_dataset()` materialise into Hugging Face
+  `datasets.IterableDataset` or `datasets.Dataset` objects when you need the
+  full HF toolkit.
 
 ## Real-World Example
 
 ```python
-from curriculus import CurriculusIterableDataset, CurriculusPlanner
+from curriculus import Curriculus
 
 # Step 1: Load your datasets
 easy_data = load_dataset("my_dataset/easy")
@@ -159,7 +167,7 @@ datasets = [
 ]
 
 # Step 3: Create dataset with 85% train split
-curriculum_dict = CurriculusIterableDataset(
+curriculum_dict = Curriculus(
     datasets,
     total_steps=100_000,
     oversampling=True,
@@ -203,7 +211,7 @@ print(planner.get_plan_summary())
 The library separates concerns:
 
 - **CurriculusPlanner**: Validates schedules, calculates sample budgets, pre-flight checks
-- **CurriculusIterableDataset**: Implements the actual sampling at training time
+- **Curriculus**: Implements the actual sampling at training time
 
 This allows you to validate your configuration before training starts, catching issues early.
 
@@ -228,20 +236,28 @@ print(planner.dataset_integrals)  # Area under each curve
 print(planner.get_plan_summary())  # Human-readable plan
 ```
 
-### CurriculusIterableDataset
+### Curriculus splits API
 
-Iterates over mixed samples.
+Iterates over mixed samples and exposes helpful adapters.
 
 ```python
-dataset = CurriculusIterableDataset(
+dataset_splits = Curriculus(
     datasets,
     schedule=...,
     total_steps=100_000,
 )
 
-for sample in dataset:
+for sample in dataset_splits["train"]:
     # Sample is from the appropriate dataset based on progress
     pass
+
+# Optional helpers
+hf_iterable = dataset_splits["train"].to_hf_iterable_dataset()
+hf_dataset = dataset_splits["train"].to_hf_dataset()
+
+# Or directly on the dataset splits
+hf_iterable = dataset_splits.to_hf_iterable_dataset()
+hf_dataset = dataset_splits.to_hf_dataset()
 ```
 
 ### generate_sequential_schedule

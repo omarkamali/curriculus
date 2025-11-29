@@ -1,3 +1,12 @@
+## [0.1.3] - 2025-11-29
+
+### Added
+- `Curriculus` splits now expose `to_hf_dataset()` alongside the `to_hf_iterable_dataset()` helper for Hugging Face interoperability.
+- Column metadata helpers (`columns`, `shape`, `num_columns`) and lazy transform utilities (`remove_column`, `rename_column(s)`, `map`) to better mirror Hugging Face Dataset ergonomics.
+
+### Changed
+- Renamed `CurriculusIterableDataset` to `Curriculus`, returning a `CurriculusSplits` mapping with richer preview and repr support.
+- Updated documentation and examples to use the simplified `Curriculus` API and highlight new helpers.
 
 ## [0.1.2] - 2025-11-29
 
