@@ -350,3 +350,4 @@ Open an issue: https://github.com/omarkamali/curriculus/issues
 Explore end-to-end walkthroughs in the `examples/` directory:
 
 1. **Sequential difficulty fade** – [examples/01_easy_medium_hard.ipynb](examples/01_easy_medium_hard.ipynb)
+2. **Conversation length autoschedule** – [examples/02_ultrachat_bucket_autoschedule.ipynb](examples/02_ultrachat_bucket_autoschedule.ipynb)
