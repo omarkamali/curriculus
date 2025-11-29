@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/curriculum
+      url: https://pypi.org/p/curriculus
 
     steps:
     - name: Download distributions

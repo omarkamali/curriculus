@@ -2,6 +2,8 @@
 Iterable dataset with curriculum learning support.
 """
 
+from __future__ import annotations
+
 import bisect
 import itertools
 import random
