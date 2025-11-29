@@ -10,7 +10,9 @@ from typing import List, Optional, Tuple
 CHANGELOG_PATH = Path(__file__).resolve().parents[1] / "CHANGELOG.md"
 PYPROJECT_PATH = Path(__file__).resolve().parents[1] / "pyproject.toml"
 
-SECTION_HEADER_RE = re.compile(r"^## \[(?P<version>\d+\.\d+\.\d+)\] - (?P<date>\d{4}-\d{2}-\d{2})\\s*$")
+SECTION_HEADER_RE = re.compile(
+    r"^## \[(?P<version>\d+\.\d+\.\d+)\] - (?P<date>\d{4}-\d{2}-\d{2})\s*$"
+)
 NAME_RE = re.compile(r'^\s*name\s*=\s*"(?P<name>[^"]+)"')
 VERSION_RE = re.compile(r'^\s*version\s*=\s*"(?P<version>\d+\.\d+\.\d+)"')
 
