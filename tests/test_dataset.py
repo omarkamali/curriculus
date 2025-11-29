@@ -401,3 +401,101 @@ class TestCurriculus:
         assert isinstance(ds_dict, datasets_mod.DatasetDict)
         assert ds_dict["train"].num_rows == 2
 
+    def test_mixed_schema_preserves_union(self):
+        """Mixing datasets with different schemas retains union of columns."""
+
+        configs = [
+            {
+                "name": "rich",
+                "dataset": MockDataset(
+                    "rich",
+                    [
+                        {"x": 1, "y": 1},
+                        {"x": 2, "y": 4},
+                    ],
+                ),
+            },
+            {
+                "name": "lean",
+                "dataset": MockDataset(
+                    "lean",
+                    [
+                        {"x": 10},
+                        {"x": 20},
+                    ],
+                ),
+            },
+        ]
+
+        schedule = [
+            (0.0, {"rich": 1.0, "lean": 0.0}),
+            (0.5, {"rich": 1.0, "lean": 0.0}),
+            (0.75, {"rich": 0.0, "lean": 1.0}),
+            (1.0, {"rich": 0.0, "lean": 1.0}),
+        ]
+
+        splits = Curriculus(
+            configs,
+            schedule=schedule,
+            total_steps=4,
+            oversampling=True,
+        )
+
+        # Force deterministic sampling order for the regression.
+        train_split = splits["train"].with_seed(0)
+
+        preview = train_split.peek(4)
+        assert len(preview) == 4
+        assert train_split.columns == ["x", "y"]
+
+        lean_rows = [row for row in preview if row["x"] in {10, 20}]
+        assert lean_rows
+        assert all(row["y"] is None for row in lean_rows)
+
+    def test_shuffled_false_preserves_original_order(self):
+        """Default iteration preserves original dataset order when not shuffled."""
+
+        data = list(range(10))
+        configs = [
+            {
+                "name": "ordered",
+                "dataset": data,
+            }
+        ]
+
+        splits = Curriculus(
+            configs,
+            total_steps=len(data),
+            seed=123,
+            shuffled=False,
+        )
+
+        items = list(splits["train"])
+        assert items == data
+
+    def test_shuffled_true_uses_deterministic_order(self):
+        """Shuffled datasets honour shuffle_seed for deterministic permutations."""
+
+        data = list(range(10))
+        configs = [
+            {
+                "name": "to_shuffle",
+                "dataset": data,
+            }
+        ]
+
+        shuffle_seed = 9876
+        splits = Curriculus(
+            configs,
+            total_steps=len(data),
+            shuffled=True,
+            shuffle_seed=shuffle_seed,
+        )
+
+        items = list(splits["train"])
+
+        expected = list(data)
+        rng = random.Random(shuffle_seed)
+        rng.shuffle(expected)
+        assert items == expected
+

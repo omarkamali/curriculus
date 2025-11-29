@@ -1,3 +1,11 @@
+## [0.1.4] - 2025-11-29
+
+### Added
+- Optional `shuffled` flag and `shuffle_seed` controls to randomize dataset order deterministically before curriculum sampling.
+
+### Fixed
+- Preserve the union of columns when mixing datasets with differing schemas, ensuring downstream transforms and metadata retain optional fields.
+
 ## [0.1.3] - 2025-11-29
 
 ### Added

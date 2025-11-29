@@ -37,10 +37,14 @@ class _CurriculusSplit:
                             (schedule, total_steps, oversampling, best_effort)
                 Additional recognised kwargs:
                     seed: Optional[int] to make iteration deterministic.
+                    shuffled: bool to randomise per-dataset order before sampling.
+                    shuffle_seed: Optional[int] to control shuffling deterministically.
                     _transforms: Internal use – transformations to apply lazily.
         """
 
         seed = planner_kwargs.pop("seed", None)
+        self.shuffled: bool = planner_kwargs.pop("shuffled", False)
+        shuffle_seed = planner_kwargs.pop("shuffle_seed", None)
         transforms = planner_kwargs.pop("_transforms", None)
 
         if planner is None:
@@ -58,7 +62,9 @@ class _CurriculusSplit:
         self._schedule_breakpoints = [pct for pct, _ in self.planner.schedule]
         self._preview_cache: Dict[int, List[Any]] = {}
         self._cached_columns: Optional[List[str]] = None
+        self._column_order: List[str] = []
         self.current_step = 0
+        self._shuffle_seed = shuffle_seed
 
     def _clone(
         self,
@@ -72,26 +78,67 @@ class _CurriculusSplit:
             planner=self.planner,
             _transforms=cloned_transforms,
             seed=self._base_seed if seed is None else seed,
+            shuffled=self.shuffled,
+            shuffle_seed=self._shuffle_seed,
         )
         return clone
 
     def _reset_caches(self) -> None:
         self._preview_cache.clear()
         self._cached_columns = None
+        self._column_order = []
+
+    def _standardize_mapping(self, mapping: Mapping[str, Any]) -> Dict[str, Any]:
+        data = dict(mapping)
+        new_keys = [key for key in data if key not in self._column_order]
+
+        if new_keys:
+            self._column_order.extend(new_keys)
+            for cached_items in self._preview_cache.values():
+                for idx, cached_item in enumerate(cached_items):
+                    if not isinstance(cached_item, Mapping):
+                        continue
+                    cached_dict = dict(cached_item)
+                    for key in new_keys:
+                        cached_dict.setdefault(key, None)
+                    cached_items[idx] = cached_dict
+
+        if not self._column_order:
+            standardized = data
+        else:
+            standardized = {key: data.get(key) for key in self._column_order}
+
+        for key, value in standardized.items():
+            if value is None and key not in data:
+                standardized[key] = None
+
+        self._cached_columns = list(self._column_order)
+        return standardized
 
     def _create_iterators(self) -> Dict[str, Iterator[Any]]:
         iterators: Dict[str, Iterator[Any]] = {}
-        for name in self.dataset_names:
+        base_seed = self._shuffle_seed if self._shuffle_seed is not None else self._base_seed
+
+        for idx, name in enumerate(self.dataset_names):
             ds = self.planner.dataset_map[name]
             try:
                 base_iterator: Iterable[Any] = ds
             except TypeError as exc:  # pragma: no cover - defensive branch
                 raise TypeError(f"Dataset '{name}' is not iterable: {ds!r}") from exc
 
-            if self.planner.oversampling:
-                iterators[name] = itertools.cycle(base_iterator)
+            if self.shuffled:
+                items = list(base_iterator)
+                if items:
+                    rng = random.Random((base_seed + idx) % 2**63)
+                    rng.shuffle(items)
+                iterable: Iterable[Any] = items
             else:
-                iterators[name] = iter(base_iterator)
+                iterable = base_iterator
+
+            if self.planner.oversampling:
+                iterators[name] = itertools.cycle(iterable)
+            else:
+                iterators[name] = iter(iterable)
 
         return iterators
 
@@ -181,7 +228,10 @@ class _CurriculusSplit:
                 iterators[chosen_key] = None
                 continue
 
-            yield self._apply_transforms(item, produced)
+            transformed = self._apply_transforms(item, produced)
+            if isinstance(transformed, Mapping):
+                transformed = self._standardize_mapping(transformed)
+            yield transformed
             produced += 1
             self.current_step += 1
 
@@ -299,14 +349,12 @@ class _CurriculusSplit:
 
         if self._cached_columns is None:
             preview = self.peek(1)
-            if not preview:
+            if not preview or not self._column_order:
                 self._cached_columns = []
             else:
-                first = preview[0]
-                if isinstance(first, Mapping):
-                    self._cached_columns = list(first.keys())
-                else:
-                    self._cached_columns = []
+                self._cached_columns = list(self._column_order)
+        elif self._column_order and self._cached_columns != self._column_order:
+            self._cached_columns = list(self._column_order)
 
         return list(self._cached_columns)
 
@@ -492,6 +540,9 @@ def Curriculus(
     *,
     train_ratio: Optional[float] = None,
     split_names: Tuple[str, str] = ("train", "test"),
+    seed: Optional[int] = None,
+    shuffled: bool = False,
+    shuffle_seed: Optional[int] = None,
     **planner_kwargs: Any,
 ) -> CurriculusSplits:
     """Build curriculum iterable dataset splits.
@@ -535,6 +586,9 @@ def Curriculus(
         splits[split_names[0]] = _CurriculusSplit(
             datasets,
             planner=train_planner,
+            seed=seed,
+            shuffled=shuffled,
+            shuffle_seed=shuffle_seed,
         )
 
     if test_steps > 0:
@@ -542,6 +596,9 @@ def Curriculus(
         splits[split_names[1]] = _CurriculusSplit(
             datasets,
             planner=test_planner,
+            seed=None if seed is None else seed + 1,
+            shuffled=shuffled,
+            shuffle_seed=None if shuffle_seed is None else shuffle_seed + 1,
         )
 
     if not splits:
