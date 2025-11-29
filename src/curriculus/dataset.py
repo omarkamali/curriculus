@@ -67,6 +67,8 @@ class _CurriculusSplit:
         self.current_step = 0
         self._shuffle_seed = shuffle_seed
 
+        self._prime_column_metadata()
+
     def _clone(
         self,
         *,
@@ -116,6 +118,43 @@ class _CurriculusSplit:
                             cached_items[idx] = cached_dict
 
         self._cached_columns = list(self._column_order)
+
+    def _prime_column_metadata(self) -> None:
+        for name in self.dataset_names:
+            ds = self.planner.dataset_map[name]
+            for column in self._extract_column_names(ds):
+                if column not in self._base_column_order:
+                    self._base_column_order.append(column)
+
+        if self._base_column_order and not self._transforms:
+            self._column_order = list(self._base_column_order)
+            self._cached_columns = list(self._column_order)
+
+    def _extract_column_names(self, dataset_ref: Any) -> List[str]:
+        # Hugging Face datasets expose column metadata via ``column_names`` or ``features``.
+        column_names = getattr(dataset_ref, "column_names", None)
+        if column_names is not None:
+            if callable(column_names):  # some libraries expose a method
+                try:
+                    column_names = column_names()
+                except TypeError:  # not callable after all
+                    pass
+            if isinstance(column_names, Sequence) and not isinstance(column_names, (str, bytes)):
+                return list(column_names)
+
+        features = getattr(dataset_ref, "features", None)
+        if features is not None:
+            if hasattr(features, "keys"):
+                try:
+                    return list(features.keys())  # type: ignore[arg-type]
+                except TypeError:
+                    pass
+            try:
+                return list(features)  # fall back to iterating feature container
+            except TypeError:
+                pass
+
+        return []
 
     def _standardize_mapping(self, mapping: Mapping[str, Any]) -> Dict[str, Any]:
         data = dict(mapping)
@@ -590,7 +629,7 @@ def _clone_planner(base: CurriculusPlanner, *, total_steps: int) -> CurriculusPl
 
 def Curriculus(
     datasets: List[Dict[str, Any]],
-    planner: Optional[CurriculusPlanner] = None,
+    schedule: Optional[List[Tuple[float, Dict[str, float]]]] = None,
     *,
     train_ratio: Optional[float] = None,
     split_names: Tuple[str, str] = ("train", "test"),
@@ -603,7 +642,7 @@ def Curriculus(
 
     Args:
         datasets: Dataset configuration list.
-        planner: Optional preconfigured planner.
+        schedule: Optional schedule list to control dataset weighting.
         train_ratio: Fraction of total steps allocated to the train split.
             Defaults to 1.0 (train only).
         split_names: Names for the train and test splits.
@@ -620,7 +659,11 @@ def Curriculus(
     if not 0.0 <= ratio <= 1.0:
         raise ValueError("train_ratio must be between 0.0 and 1.0 inclusive")
 
-    base_planner = planner or CurriculusPlanner(datasets, **planner_kwargs)
+    planner_kwargs = dict(planner_kwargs)
+    if schedule is not None:
+        planner_kwargs.setdefault("schedule", schedule)
+
+    base_planner = CurriculusPlanner(datasets, **planner_kwargs)
     total_steps = base_planner.total_steps
 
     train_steps = int(round(total_steps * ratio))
@@ -630,9 +673,7 @@ def Curriculus(
     splits: Dict[str, _CurriculusSplit] = {}
 
     if train_steps > 0:
-        if train_steps == base_planner.total_steps and planner is not None:
-            train_planner = base_planner
-        elif train_steps == base_planner.total_steps and planner is None:
+        if train_steps == base_planner.total_steps:
             train_planner = base_planner
         else:
             train_planner = _clone_planner(base_planner, total_steps=train_steps)

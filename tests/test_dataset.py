@@ -552,6 +552,93 @@ class TestCurriculus:
         assert any(row["c"] is not None for row in rows)
         assert train_split.columns == ["a", "b", "c"]
 
+    def test_curriculus_accepts_positional_schedule(self):
+        """Providing schedule positionally should configure the planner."""
+
+        configs = [
+            {
+                "name": "A",
+                "dataset": MockDataset("A", ["A"] * 10),
+            },
+            {
+                "name": "B",
+                "dataset": MockDataset("B", ["B"] * 10),
+            },
+        ]
+
+        schedule = [
+            (0.0, {"A": 1.0, "B": 0.0}),
+            (1.0, {"A": 0.0, "B": 1.0}),
+        ]
+
+        splits = Curriculus(configs, schedule, total_steps=4, oversampling=True)
+        items = list(splits["train"])
+        assert len(items) == 4
+        assert set(items).issubset({"A", "B"})
+
+    def test_curriculus_rejects_planner_argument(self):
+        """Providing a planner argument is no longer supported."""
+
+        configs = [
+            {
+                "name": "A",
+                "dataset": MockDataset("A", ["A"] * 5),
+            }
+        ]
+
+        schedule = [
+            (0.0, {"A": 1.0}),
+            (1.0, {"A": 1.0}),
+        ]
+
+        with pytest.raises(TypeError):
+            Curriculus(configs, schedule, planner=None)  # type: ignore[arg-type]
+
+    def test_columns_union_primed_from_features(self):
+        """Column metadata is primed from dataset features without iteration."""
+
+        class HFStub:
+            def __init__(self, rows, features):
+                self._rows = rows
+                self.features = features
+
+            def __iter__(self):
+                yield from self._rows
+
+            def __len__(self):
+                return len(self._rows)
+
+        configs = [
+            {
+                "name": "foundational",
+                "dataset": HFStub(
+                    [{"messages": 1}],
+                    ["messages"],
+                ),
+            },
+            {
+                "name": "translation",
+                "dataset": HFStub(
+                    [{"messages": 2, "token_count": 10}],
+                    ["messages", "token_count"],
+                ),
+            },
+            {
+                "name": "instruct",
+                "dataset": HFStub(
+                    [{"messages": 3, "token_count": 20, "tools": 1}],
+                    ["messages", "token_count", "tools"],
+                ),
+            },
+        ]
+
+        split = Curriculus(configs, total_steps=3, oversampling=True)["train"]
+
+        assert split.columns == ["messages", "token_count", "tools"]
+
+        sample = split.peek(1)[0]
+        assert set(sample.keys()) == {"messages", "token_count", "tools"}
+
     def test_union_of_columns_auto_schedule(self):
         """Auto-generated schedules still retain the full column union."""
 
